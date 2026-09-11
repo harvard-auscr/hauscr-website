@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+node_modules/
+.venv/
+venv/
+*.log
+# local build artifacts
+.DS_Store
+.shots/

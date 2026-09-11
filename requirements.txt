@@ -1,0 +1,7 @@
+# Python dependencies for mirror.py (the static-mirror generator).
+requests>=2.31
+lxml>=5.0
+beautifulsoup4>=4.12
+# Pillow is optional (not required by the current pipeline); listed for future
+# image post-processing. ffmpeg (system binary) is required only to port the
+# Squarespace native/HLS video blocks to self-hosted mp4.
