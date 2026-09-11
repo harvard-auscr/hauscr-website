@@ -70,3 +70,93 @@ img:not(.loaded) { opacity: 1 !important; }
   opacity: .8;
 }
 .mirror-form-note { font-size: .85em; opacity: .75; margin: .5em 0 0; font-style: italic; }
+
+/* 6. Gallery reel (Squarespace 'gallery-reel-item-src' Fluid slideshow). The live
+      runtime JS lays the absolutely-stacked items into a draggable one-at-a-time
+      reel and toggles [data-visible]; with the JS stripped every item stays
+      display:none and the block renders blank. Re-flow the reel as a horizontal,
+      scrollable filmstrip so every photo is visible (arrows remain as decoration).
+      Scoped to .gallery-reel only, so the hidden lightbox overlay stays hidden. */
+.gallery-reel .gallery-reel-list {
+  position: relative !important;
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  align-items: stretch !important;
+  gap: 6px;
+  width: 100% !important;
+  height: 100% !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  left: 0 !important;
+  right: auto !important;
+  cursor: auto !important;
+  -webkit-overflow-scrolling: touch;
+}
+.gallery-reel .gallery-reel-item {
+  position: relative !important;
+  flex: 0 0 auto !important;
+  top: auto !important;
+  left: auto !important;
+  height: 100% !important;
+  width: auto !important;
+}
+.gallery-reel .gallery-reel-item-wrapper {
+  position: relative !important;
+  top: auto !important;
+  left: auto !important;
+  width: auto !important;
+  height: 100% !important;
+  z-index: auto !important;
+  overflow: visible !important;
+}
+.gallery-reel .gallery-reel-item-src {
+  position: relative !important;
+  display: block !important;
+  opacity: 1 !important;
+  top: auto !important;
+  left: auto !important;
+  width: auto !important;
+  height: 100% !important;
+}
+.gallery-reel .gallery-reel-item-src img,
+.gallery-reel .gallery-reel-item img {
+  position: relative !important;
+  display: block !important;
+  top: auto !important;
+  left: auto !important;
+  width: auto !important;
+  height: 100% !important;
+  object-fit: contain !important;
+}
+
+/* 7. Marquee scrolling ticker. mirror.py rebuilds the block's contents as a
+      duplicated track (two identical groups); animate it -50% for a seamless loop.
+      The block keeps its .Marquee class so the theme's responsive font-size wins. */
+.Marquee { min-height: 1em; }
+.Marquee .mirror-marquee-track {
+  display: flex;
+  flex-wrap: nowrap;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  will-change: transform;
+  animation: mirror-marquee-scroll 18s linear infinite;
+}
+.Marquee .mirror-marquee-track--right { animation-direction: reverse; }
+.Marquee .mirror-marquee-group {
+  display: flex;
+  flex-wrap: nowrap;
+  flex: 0 0 auto;
+}
+.Marquee .mirror-marquee-item {
+  margin: 0;
+  padding: 0 .35em;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+@keyframes mirror-marquee-scroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .Marquee .mirror-marquee-track { animation: none; }
+}

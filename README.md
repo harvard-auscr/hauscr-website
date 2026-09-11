@@ -129,6 +129,21 @@ always kept visible in a reasonable form rather than dropped silently.
   videos autoplay muted on the live site regardless). If `ffmpeg` is
   unavailable at generation time, the block degrades to a poster image.
 
+**Scrolling ticker & photo reel** (Fluid Engine components)
+- The **Marquee** scrolling-ticker blocks (homepage "6 Annual Conferences",
+  `/ctb`, `/hsylc`) ship an empty SVG `<path>` whose geometry Squarespace's
+  runtime JS computes from container/font metrics; without that JS the block
+  collapses to zero height. `mirror.py` rebuilds each ticker from its
+  `data-marquee-items` text as a duplicated, **CSS-animated** scrolling track
+  (`mirror-overrides.css`), so the heading text is visible and scrolls. The
+  exact JS-driven wave path and per-block speed easing are **not** reproduced.
+- The **gallery-reel** photo slideshows (`/apply`) rely on runtime JS to lay out
+  their absolutely-stacked, `display:none` items into a draggable one-at-a-time
+  reel. `mirror-overrides.css` re-flows them into a **horizontally-scrollable
+  filmstrip** with every photo visible (reel arrows remain as decoration); the
+  drag/one-slide-at-a-time interaction and the click-to-zoom **lightbox** overlay
+  are dropped (the lightbox markup stays hidden, matching its default state).
+
 **Folder pages**
 - `/conferences` and `/about-us` are Squarespace **nav folders** that 302-redirect
   to their first child on the live site. They are reproduced as **redirect

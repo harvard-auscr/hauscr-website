@@ -63,6 +63,15 @@ FOLDER_REDIRECTS = {
     "/about-us": "/about-huauscr",
 }
 
+# In-page links that point at a slug the live site resolves via a server-side
+# redirect but that has no static equivalent in the mirror. The homepage hero's
+# "Learn More" CTA links to /about-hauscr, while the actual page (and the rest of
+# the nav) lives at /about-huauscr; static hosting has no redirect layer, so we
+# reconcile such links to the real generated slug at rewrite time.
+LINK_SLUG_FIXES = {
+    "/about-hauscr": "/about-huauscr",
+}
+
 # Paths we never crawl as pages.
 SKIP_PAGE_PREFIXES = ("/cart", "/search", "/config", "/account", "/checkout", "/s/", "/api/")
 
@@ -331,6 +340,9 @@ def rewrite_internal_href(href, mirror):
     if path.startswith("/s/"):
         local = mirror.register_asset(urljoin(SRC_ORIGIN, path), kind="files")
         return local + frag
+    # Reconcile source slugs that only resolve via a live redirect to the real
+    # generated page slug (e.g. /about-hauscr -> /about-huauscr).
+    path = LINK_SLUG_FIXES.get(normalize_path(path), path)
     return route_for(path, mirror.base) + frag
 
 
@@ -341,6 +353,7 @@ def discover_links(soup):
         if not is_internal(href):
             continue
         path = normalize_path(to_path(href))
+        path = LINK_SLUG_FIXES.get(path, path)  # reconcile redirect-only slugs
         if any(path.startswith(pre.rstrip("/")) for pre in SKIP_PAGE_PREFIXES):
             continue
         out.append(path)
@@ -389,8 +402,12 @@ def process_images(soup, mirror):
         if "loaded" not in cls:
             cls.append("loaded")
         img["class"] = cls
-        if img.get("loading") == "eager":
-            pass
+        # Images inside a gallery-reel are re-flowed by mirror-overrides.css into a
+        # horizontally-scrolling filmstrip. Native loading="lazy" would leave every
+        # item past the first few unloaded (a vertical page scroll never brings a
+        # horizontally-overflowed item into view), so force eager loading for reels.
+        if img.find_parent(class_="gallery-reel-item"):
+            img["loading"] = "eager"
 
     # <source> inside <picture>
     for src in soup.find_all("source"):
@@ -642,6 +659,59 @@ def embed_iframe(soup, embed):
     return wrap
 
 
+def process_marquee(soup, mirror):
+    """Rebuild Squarespace 'Marquee' scrolling-ticker blocks as a static, JS-free
+    CSS-animated marquee.
+
+    The live block ships an empty SVG <path d="">; Squarespace's runtime JS computes
+    the path geometry from container width/font metrics and lays the text along it.
+    Without that JS the SVG has height:0 and the whole block collapses to nothing.
+    We read the ticker text from data-marquee-items (falling back to the hidden
+    .Marquee-measure items) and replace the block's contents with a duplicated,
+    horizontally-scrolling track that mirror-overrides.css animates. The block keeps
+    its own id/classes so the theme's responsive .Marquee p font-size still applies.
+    """
+    for mq in soup.select(".Marquee"):
+        items = []
+        raw = mq.get("data-marquee-items")
+        if raw:
+            try:
+                for it in json.loads(raw):
+                    t = (it.get("text") if isinstance(it, dict) else str(it)) or ""
+                    t = t.strip()
+                    if t:
+                        items.append(t)
+            except Exception:  # noqa: BLE001
+                pass
+        if not items:
+            for el in mq.select(".Marquee-measure .Marquee-item"):
+                t = el.get_text(strip=True)
+                if t:
+                    items.append(t)
+        if not items:
+            continue
+
+        direction = (mq.get("data-animation-direction") or "left").strip().lower()
+        mq.clear()
+        track_cls = "mirror-marquee-track"
+        if direction == "right":
+            track_cls += " mirror-marquee-track--right"
+        track = soup.new_tag("div", **{"class": track_cls})
+        # Two identical groups so a -50% translate loops seamlessly; each group
+        # repeats the items enough to overflow even wide viewports.
+        for g in range(2):
+            group = soup.new_tag("div", **{"class": "mirror-marquee-group"})
+            if g == 1:
+                group["aria-hidden"] = "true"
+            for _ in range(4):
+                for t in items:
+                    p = soup.new_tag("p", **{"class": "mirror-marquee-item"})
+                    p.string = t
+                    group.append(p)
+            track.append(group)
+        mq.append(track)
+
+
 def process_forms(soup, mirror):
     """Rebuild Squarespace form blocks (fields injected by JS) as a static, visually
     faithful, inactive form using the block's sqs-form-block-context JSON."""
@@ -809,6 +879,7 @@ def process_page(html, page_path, mirror):
     process_block_css(soup, mirror)
     process_images(soup, mirror)
     process_video_blocks(soup, mirror)
+    process_marquee(soup, mirror)        # rebuild scrolling-ticker blocks (JS-computed SVG path)
     process_forms(soup, mirror)          # must read block-context JSON BEFORE scripts are stripped
     strip_runtime(soup)                  # now remove all runtime JS + chrome
     process_inline_styles(soup, mirror, SRC_ORIGIN + page_path)
@@ -967,6 +1038,96 @@ img:not(.loaded) { opacity: 1 !important; }
   opacity: .8;
 }
 .mirror-form-note { font-size: .85em; opacity: .75; margin: .5em 0 0; font-style: italic; }
+
+/* 6. Gallery reel (Squarespace 'gallery-reel-item-src' Fluid slideshow). The live
+      runtime JS lays the absolutely-stacked items into a draggable one-at-a-time
+      reel and toggles [data-visible]; with the JS stripped every item stays
+      display:none and the block renders blank. Re-flow the reel as a horizontal,
+      scrollable filmstrip so every photo is visible (arrows remain as decoration).
+      Scoped to .gallery-reel only, so the hidden lightbox overlay stays hidden. */
+.gallery-reel .gallery-reel-list {
+  position: relative !important;
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  align-items: stretch !important;
+  gap: 6px;
+  width: 100% !important;
+  height: 100% !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  left: 0 !important;
+  right: auto !important;
+  cursor: auto !important;
+  -webkit-overflow-scrolling: touch;
+}
+.gallery-reel .gallery-reel-item {
+  position: relative !important;
+  flex: 0 0 auto !important;
+  top: auto !important;
+  left: auto !important;
+  height: 100% !important;
+  width: auto !important;
+}
+.gallery-reel .gallery-reel-item-wrapper {
+  position: relative !important;
+  top: auto !important;
+  left: auto !important;
+  width: auto !important;
+  height: 100% !important;
+  z-index: auto !important;
+  overflow: visible !important;
+}
+.gallery-reel .gallery-reel-item-src {
+  position: relative !important;
+  display: block !important;
+  opacity: 1 !important;
+  top: auto !important;
+  left: auto !important;
+  width: auto !important;
+  height: 100% !important;
+}
+.gallery-reel .gallery-reel-item-src img,
+.gallery-reel .gallery-reel-item img {
+  position: relative !important;
+  display: block !important;
+  top: auto !important;
+  left: auto !important;
+  width: auto !important;
+  height: 100% !important;
+  object-fit: contain !important;
+}
+
+/* 7. Marquee scrolling ticker. mirror.py rebuilds the block's contents as a
+      duplicated track (two identical groups); animate it -50% for a seamless loop.
+      The block keeps its .Marquee class so the theme's responsive font-size wins. */
+.Marquee { min-height: 1em; }
+.Marquee .mirror-marquee-track {
+  display: flex;
+  flex-wrap: nowrap;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  will-change: transform;
+  animation: mirror-marquee-scroll 18s linear infinite;
+}
+.Marquee .mirror-marquee-track--right { animation-direction: reverse; }
+.Marquee .mirror-marquee-group {
+  display: flex;
+  flex-wrap: nowrap;
+  flex: 0 0 auto;
+}
+.Marquee .mirror-marquee-item {
+  margin: 0;
+  padding: 0 .35em;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+@keyframes mirror-marquee-scroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .Marquee .mirror-marquee-track { animation: none; }
+}
 """
 
 
