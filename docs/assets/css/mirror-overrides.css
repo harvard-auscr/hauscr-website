@@ -1,0 +1,72 @@
+/* mirror-overrides.css - fixes for serving the Squarespace markup without its
+   runtime JavaScript. Loaded last so these rules win the cascade. */
+
+/* 1. Substitute the domain-locked Typekit heading font (acumin-pro) with a free
+      Google Fonts equivalent (Archivo). Body text (Poppins) is self-hosted. */
+:root {
+  --heading-font-font-family: 'Archivo', 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
+}
+
+/* 2. Squarespace hides images until its lazy-loader marks them .loaded / [data-loaded].
+      We set those statically in mirror.py; force visibility here as a safety net. */
+img { opacity: 1 !important; }
+.sqs-gallery-block-grid img,
+.sqs-gallery-design-autocolumns-slide img,
+[data-loader],
+img:not(.loaded) { opacity: 1 !important; }
+[data-loaded] { opacity: 1 !important; }
+
+/* 3. Full-bleed section backgrounds render even without the JS background loader. */
+.section-background img,
+.section-background .content-fill {
+  opacity: 1 !important;
+  display: block;
+}
+
+/* 4. Responsive 16:9 video/embed wrapper for ported video blocks. */
+.mirror-video-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  overflow: hidden;
+}
+.mirror-video-wrap .mirror-video,
+.mirror-video-wrap iframe,
+.mirror-video-wrap .mirror-video-poster {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  object-fit: cover;
+  display: block;
+}
+
+/* 5. Inactive contact form: keep the visual layout, show it is disabled. */
+.mirror-form { display: flex; flex-direction: column; gap: 1.1em; width: 100%; }
+.mirror-form-field { display: flex; flex-direction: column; gap: .4em; }
+.mirror-form-field label { font-weight: 600; font-size: .95em; }
+.mirror-form-field input,
+.mirror-form-field textarea,
+.mirror-form-field select {
+  width: 100%;
+  padding: .7em .8em;
+  border: 1px solid rgba(0,0,0,.35);
+  background: rgba(0,0,0,.02);
+  font: inherit;
+  color: inherit;
+  box-sizing: border-box;
+}
+.mirror-form-name-row { display: flex; gap: .8em; }
+.mirror-form-name-row input { flex: 1; }
+.mirror-form-submit {
+  padding: .8em 2em;
+  border: 0;
+  background: #999;
+  color: #fff;
+  font: inherit;
+  cursor: not-allowed;
+  opacity: .8;
+}
+.mirror-form-note { font-size: .85em; opacity: .75; margin: .5em 0 0; font-style: italic; }
