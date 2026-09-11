@@ -75,7 +75,8 @@ img:not(.loaded) { opacity: 1 !important; }
       runtime JS lays the absolutely-stacked items into a draggable one-at-a-time
       reel and toggles [data-visible]; with the JS stripped every item stays
       display:none and the block renders blank. Re-flow the reel as a horizontal,
-      scrollable filmstrip so every photo is visible (arrows remain as decoration).
+      scrollable filmstrip so every photo is visible; the prev/next arrows scroll it
+      one item per click via site.js.
       Scoped to .gallery-reel only, so the hidden lightbox overlay stays hidden. */
 .gallery-reel .gallery-reel-list {
   position: relative !important;
@@ -91,10 +92,16 @@ img:not(.loaded) { opacity: 1 !important; }
   right: auto !important;
   cursor: auto !important;
   -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
 }
+.gallery-reel .gallery-reel-controls,
+.gallery-reel .gallery-reel-control { pointer-events: none; }
+.gallery-reel .gallery-reel-control-btn { pointer-events: auto; cursor: pointer; }
 .gallery-reel .gallery-reel-item {
   position: relative !important;
   flex: 0 0 auto !important;
+  scroll-snap-align: start;
   top: auto !important;
   left: auto !important;
   height: 100% !important;

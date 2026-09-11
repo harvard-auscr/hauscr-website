@@ -63,4 +63,30 @@
   });
 
   resetFolders();
+
+  // Gallery reel arrows. The mirror lays each Squarespace 'gallery-reel' out as a
+  // horizontal scroll strip (see mirror-overrides.css); the live site's runtime JS
+  // slides one item per click, so do the same by scrolling one item width, and
+  // wrap around at either end so the buttons are never dead.
+  document.querySelectorAll('.gallery-reel').forEach(function (reel) {
+    var list = reel.querySelector('.gallery-reel-list');
+    if (!list) return;
+    function step(dir) {
+      var item = list.querySelector('.gallery-reel-item');
+      var gap = 6;
+      var w = item ? item.getBoundingClientRect().width + gap : list.clientWidth * 0.8;
+      var max = Math.max(0, list.scrollWidth - list.clientWidth);
+      var next = list.scrollLeft + dir * w;
+      if (dir > 0 && list.scrollLeft >= max - 2) next = 0;
+      else if (dir < 0 && list.scrollLeft <= 2) next = max;
+      list.scrollTo({ left: Math.max(0, Math.min(max, next)), behavior: 'smooth' });
+    }
+    var scope = reel.closest('.gallery-reel-wrapper') || reel.parentElement || reel;
+    scope.querySelectorAll('.gallery-reel-control-btn[data-previous]').forEach(function (b) {
+      b.addEventListener('click', function (e) { e.preventDefault(); step(-1); });
+    });
+    scope.querySelectorAll('.gallery-reel-control-btn[data-next]').forEach(function (b) {
+      b.addEventListener('click', function (e) { e.preventDefault(); step(1); });
+    });
+  });
 })();

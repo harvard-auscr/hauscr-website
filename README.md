@@ -140,9 +140,18 @@ always kept visible in a reasonable form rather than dropped silently.
 - The **gallery-reel** photo slideshows (`/apply`) rely on runtime JS to lay out
   their absolutely-stacked, `display:none` items into a draggable one-at-a-time
   reel. `mirror-overrides.css` re-flows them into a **horizontally-scrollable
-  filmstrip** with every photo visible (reel arrows remain as decoration); the
+  filmstrip** with every photo visible; the prev/next arrows scroll it one photo
+  per click (`site.js`, wrapping at either end). The
   drag/one-slide-at-a-time interaction and the click-to-zoom **lightbox** overlay
   are dropped (the lightbox markup stays hidden, matching its default state).
+
+**Text highlights** (curved / scribble underlines, circles, markers)
+- Squarespace draws these at runtime from a per-block `TextAttributes-props`
+  JSON blob (e.g. the red curved underline under "Applications for 2026-2027
+  have opened!" on `/apply`). `mirror.py` turns each one into a static CSS
+  rule on the `.sqsrte-text-highlight` span: an SVG background underline in the
+  site accent color that repeats per line box. Shape, thickness and color are
+  honored; the draw-on animation is not.
 
 **Folder pages**
 - `/conferences` and `/about-us` are Squarespace **nav folders** that 302-redirect

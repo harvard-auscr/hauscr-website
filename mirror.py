@@ -360,6 +360,107 @@ def discover_links(soup):
     return out
 
 
+def _accent_hex(mirror):
+    """Resolve the site's THEME_COLOR accent (--accent-hsl in the downloaded site CSS) to a hex string."""
+    cached = getattr(mirror, "_accent_hex", None)
+    if cached:
+        return cached
+    hsl = None
+    css_dir = os.path.join(mirror.out, "assets", "css")
+    if os.path.isdir(css_dir):
+        for name in sorted(os.listdir(css_dir)):
+            if not name.endswith(".css"):
+                continue
+            try:
+                txt = open(os.path.join(css_dir, name), encoding="utf-8", errors="ignore").read()
+            except OSError:
+                continue
+            m = re.search(r"--accent-hsl:\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%", txt)
+            if m:
+                hsl = tuple(float(x) for x in m.groups())
+                break
+    if hsl is None:
+        hsl = (352.0, 52.63, 44.71)  # hauscr.org crimson, observed 2026-09-10
+    import colorsys
+    r, g, b = colorsys.hls_to_rgb(hsl[0] / 360.0, hsl[2] / 100.0, hsl[1] / 100.0)
+    mirror._accent_hex = "#%02x%02x%02x" % (round(r * 255), round(g * 255), round(b * 255))
+    return mirror._accent_hex
+
+
+_HIGHLIGHT_PATHS = {
+    # viewBox 0 0 100 10, stretched to the text width x ~0.4em; stroke scaled so it renders `thickness` em tall
+    "underlineCurve":    "M2,7.5 C30,2.5 70,2.5 98,7.5",
+    "underline":         "M2,5 L98,5",
+    "underlineStraight": "M2,5 L98,5",
+    "underlineDouble":   "M2,3 L98,3 M2,7.5 L98,7.5",
+    "underlineScribble": "M2,6 Q10,2 18,6 T34,6 T50,6 T66,6 T82,6 T98,6",
+    "scribble":          "M2,6 Q10,2 18,6 T34,6 T50,6 T66,6 T82,6 T98,6",
+    "underlineZigzag":   "M2,7 L12,3 L22,7 L32,3 L42,7 L52,3 L62,7 L72,3 L82,7 L92,3 L98,7",
+}
+
+
+def process_text_highlights(soup, mirror):
+    """Squarespace 'text attributes' (curved/scribble underlines, marker highlights, circles)
+    are drawn at runtime by JS from a per-block <script class="TextAttributes-props"
+    type="application/json"> blob; the <span class="sqsrte-text-highlight"> itself is bare.
+    Reproduce each one statically as CSS on the span (an SVG background underline that
+    repeats per line box), scoped by the attribute id, and drop the JSON."""
+    rules = []
+    for sc in soup.find_all("script", class_="TextAttributes-props"):
+        try:
+            attrs = json.loads(sc.string or "[]")
+        except (ValueError, TypeError):
+            attrs = []
+        for a in attrs if isinstance(attrs, list) else []:
+            if not isinstance(a, dict) or a.get("type") != "highlight" or not a.get("id"):
+                continue
+            color = a.get("color") or {}
+            if isinstance(color, dict) and color.get("type") == "THEME_COLOR":
+                hexc = _accent_hex(mirror)
+            elif isinstance(color, dict) and isinstance(color.get("value"), dict) and "hex" in color["value"]:
+                hexc = str(color["value"]["hex"])
+            elif isinstance(color, str) and color.startswith("#"):
+                hexc = color
+            else:
+                hexc = _accent_hex(mirror)
+            thickness = a.get("thickness") or {}
+            em = float(thickness.get("value", 0.1)) if isinstance(thickness, dict) else 0.1
+            box_em = max(0.3, em * 4)
+            stroke = 10.0 * em / box_em  # stroke renders `em` em tall after the 10-unit-high viewBox is stretched to box_em
+            cap = a.get("linecap") or "round"
+            shape = a.get("shape") or "underline"
+            sel = '.sqsrte-text-highlight[data-text-attribute-id="%s"]' % a["id"]
+            if shape in _HIGHLIGHT_PATHS:
+                svg = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 10' preserveAspectRatio='none'>"
+                       "<path d='%s' fill='none' stroke='%s' stroke-width='%.2f' stroke-linecap='%s' stroke-linejoin='round'/></svg>"
+                       % (_HIGHLIGHT_PATHS[shape], hexc, stroke, cap))
+                uri = "data:image/svg+xml;utf8," + (svg.replace("#", "%23").replace("<", "%3C")
+                                                    .replace(">", "%3E").replace("'", "%27"))
+                rules.append(
+                    '%s{background-image:url("%s");background-repeat:no-repeat;background-position:0 100%%;'
+                    'background-size:100%% %.2fem;padding-bottom:%.2fem;'
+                    '-webkit-box-decoration-break:clone;box-decoration-break:clone}'
+                    % (sel, uri, box_em, em * 1.2))
+            elif shape in ("circle", "circleWrap", "ellipse"):
+                rules.append("%s{border:%.2fem solid %s;border-radius:50%%;padding:.05em .35em;"
+                             "-webkit-box-decoration-break:clone;box-decoration-break:clone}" % (sel, em, hexc))
+            elif shape in ("strikethrough", "lineThrough"):
+                rules.append("%s{text-decoration:line-through;text-decoration-color:%s;text-decoration-thickness:%.2fem}"
+                             % (sel, hexc, em))
+            else:  # marker / highlight box / unknown: tinted background behind the text
+                rules.append("%s{background-color:%s33;padding:0 .1em;"
+                             "-webkit-box-decoration-break:clone;box-decoration-break:clone}" % (sel, hexc))
+        sc.decompose()
+    if rules:
+        style = soup.new_tag("style")
+        style["class"] = "mirror-text-highlights"
+        style.string = "\n".join(rules)
+        (soup.head or soup).append(style)
+        stats = getattr(mirror, "stats", None)
+        if isinstance(stats, dict):
+            stats["text_highlights"] = stats.get("text_highlights", 0) + len(rules)
+
+
 def strip_runtime(soup):
     """Remove scripts and preconnect/preload style link hints."""
     for s in soup.find_all("script"):
@@ -881,6 +982,7 @@ def process_page(html, page_path, mirror):
     process_video_blocks(soup, mirror)
     process_marquee(soup, mirror)        # rebuild scrolling-ticker blocks (JS-computed SVG path)
     process_forms(soup, mirror)          # must read block-context JSON BEFORE scripts are stripped
+    process_text_highlights(soup, mirror)  # static CSS for JS-drawn text decorations (also needs the JSON)
     strip_runtime(soup)                  # now remove all runtime JS + chrome
     process_inline_styles(soup, mirror, SRC_ORIGIN + page_path)
     rewrite_links(soup, mirror)
@@ -962,6 +1064,32 @@ SITE_JS = """\
   });
 
   resetFolders();
+
+  // Gallery reel arrows. The mirror lays each Squarespace 'gallery-reel' out as a
+  // horizontal scroll strip (see mirror-overrides.css); the live site's runtime JS
+  // slides one item per click, so do the same by scrolling one item width, and
+  // wrap around at either end so the buttons are never dead.
+  document.querySelectorAll('.gallery-reel').forEach(function (reel) {
+    var list = reel.querySelector('.gallery-reel-list');
+    if (!list) return;
+    function step(dir) {
+      var item = list.querySelector('.gallery-reel-item');
+      var gap = 6;
+      var w = item ? item.getBoundingClientRect().width + gap : list.clientWidth * 0.8;
+      var max = Math.max(0, list.scrollWidth - list.clientWidth);
+      var next = list.scrollLeft + dir * w;
+      if (dir > 0 && list.scrollLeft >= max - 2) next = 0;
+      else if (dir < 0 && list.scrollLeft <= 2) next = max;
+      list.scrollTo({ left: Math.max(0, Math.min(max, next)), behavior: 'smooth' });
+    }
+    var scope = reel.closest('.gallery-reel-wrapper') || reel.parentElement || reel;
+    scope.querySelectorAll('.gallery-reel-control-btn[data-previous]').forEach(function (b) {
+      b.addEventListener('click', function (e) { e.preventDefault(); step(-1); });
+    });
+    scope.querySelectorAll('.gallery-reel-control-btn[data-next]').forEach(function (b) {
+      b.addEventListener('click', function (e) { e.preventDefault(); step(1); });
+    });
+  });
 })();
 """
 
@@ -1043,7 +1171,8 @@ img:not(.loaded) { opacity: 1 !important; }
       runtime JS lays the absolutely-stacked items into a draggable one-at-a-time
       reel and toggles [data-visible]; with the JS stripped every item stays
       display:none and the block renders blank. Re-flow the reel as a horizontal,
-      scrollable filmstrip so every photo is visible (arrows remain as decoration).
+      scrollable filmstrip so every photo is visible; the prev/next arrows scroll it
+      one item per click via site.js.
       Scoped to .gallery-reel only, so the hidden lightbox overlay stays hidden. */
 .gallery-reel .gallery-reel-list {
   position: relative !important;
@@ -1059,10 +1188,16 @@ img:not(.loaded) { opacity: 1 !important; }
   right: auto !important;
   cursor: auto !important;
   -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
 }
+.gallery-reel .gallery-reel-controls,
+.gallery-reel .gallery-reel-control { pointer-events: none; }
+.gallery-reel .gallery-reel-control-btn { pointer-events: auto; cursor: pointer; }
 .gallery-reel .gallery-reel-item {
   position: relative !important;
   flex: 0 0 auto !important;
+  scroll-snap-align: start;
   top: auto !important;
   left: auto !important;
   height: 100% !important;
