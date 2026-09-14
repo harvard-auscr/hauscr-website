@@ -10,7 +10,7 @@ site can be served from **GitHub Pages as a development preview**.
 > snapshot for development/preview only. It carries `noindex, nofollow` on every
 > page so it never competes with the live site in search.
 
-**Preview URL (once Pages is enabled — a later step):**
+**Preview URL:**
 `https://harvard-auscr.github.io/hauscr-website/`
 
 The generated site lives in [`docs/`](docs/) and is served from `main:/docs`.
