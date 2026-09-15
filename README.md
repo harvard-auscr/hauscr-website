@@ -50,8 +50,28 @@ path:
 MSYS_NO_PATHCONV=1 python mirror.py --base /hauscr-website --out docs
 ```
 
+### Serving from a custom domain
+
+GitHub Pages serves a custom domain at the domain root, so the base path must be
+empty. `--cname` writes `docs/CNAME` (Pages reads that file to bind the domain)
+and switches the canonical / `og:url` origin to that host:
+
+```bash
+python mirror.py --base "" --cname dev.hauscr.org --out docs
+```
+
+A run without `--cname` deletes a stale `docs/CNAME`, so a plain regeneration
+always puts the site back on the `github.io` sub-path. `--pages-host` sets the
+canonical origin on its own if it ever differs from the CNAME host. Binding the
+domain also needs a DNS record (`dev` CNAME → `harvard-auscr.github.io`) and the
+repository's Pages setting (`gh api -X PUT repos/harvard-auscr/hauscr-website/pages
+-f cname=dev.hauscr.org`). Pages are `noindex` on either host.
+
 The run is **idempotent**: assets already present on disk are not re-downloaded,
 so re-running only refreshes the HTML/CSS rewriting and picks up anything new.
+Cached stylesheets are re-prefixed for the current `--base`, and asset files the
+snapshot no longer references (Squarespace rotates its CSS hashes) are deleted at
+the end of the run and listed in the output.
 The scrape is strictly **read-only** toward Squarespace (polite: ≤6 concurrent
 downloads, browser User-Agent, retry with backoff — nothing on the live site is
 ever modified).
@@ -62,7 +82,8 @@ GitHub Pages serves this project at a sub-path (`/hauscr-website/`), not at a
 domain root. So **every** root-relative URL in the output is prefixed with that
 base path — links become `/hauscr-website/executives/`, assets become
 `/hauscr-website/assets/img/...`, etc. Change the prefix with `--base` if the
-repository (and therefore the Pages sub-path) is ever renamed.
+repository (and therefore the Pages sub-path) is ever renamed, or pass an empty
+`--base ""` when the site is served from a domain root (see custom domain above).
 
 Internal links are normalized to end in `/` (so `/about-us` →
 `/hauscr-website/about-us/`), which resolves to that folder's `index.html`.

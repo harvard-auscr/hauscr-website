@@ -37,8 +37,13 @@ from bs4 import BeautifulSoup
 # --------------------------------------------------------------------------- #
 
 SRC_ORIGIN = "https://www.hauscr.org"          # ALWAYS the www host (bare host has a bad cert)
-PAGES_HOST = "https://harvard-auscr.github.io"  # GitHub Pages origin for canonical/og:url
+PAGES_HOST = "https://harvard-auscr.github.io"  # default origin for canonical/og:url; --pages-host / --cname override
 SITE_ID = "63bbb9a897fc6b2ebb873111"
+
+# A url() that this script already rewrote to a self-hosted asset, under any earlier
+# --base (cached CSS on disk is reused across runs, so the prefix may be stale).
+_LOCAL_ASSET_RE = re.compile(
+    r"^(?:/[A-Za-z0-9._~-]+)*?/assets/(?P<rest>(?:css|img|fonts|files|js|video)/[^)]+)$")
 
 # Hosts whose assets we self-host.
 SQSP_HOST_RE = re.compile(
@@ -121,9 +126,10 @@ def fetch(url, binary=False, tries=4, timeout=40):
 # --------------------------------------------------------------------------- #
 
 class Mirror:
-    def __init__(self, base, out):
-        self.base = base.rstrip("/")            # e.g. /hauscr-website
+    def __init__(self, base, out, cname=None):
+        self.base = base.rstrip("/")            # e.g. /hauscr-website, or "" at a domain root
         self.out = out                          # e.g. docs
+        self.cname = cname                      # custom domain -> <out>/CNAME (GitHub Pages)
         # maps absolute source URL -> local repo-root-relative path (with base)
         self.asset_map = {}
         # queued downloads: local_disk_path -> (source_url, kind)
@@ -237,10 +243,13 @@ class Mirror:
             raw = m.group(1).strip().strip('\'"')
             if raw.startswith("data:") or not raw:
                 return m.group(0)
-            # Already rewritten to a local base-prefixed asset: leave as-is
-            # (prevents double-processing on repeated passes).
-            if raw.startswith(self.base + "/"):
-                return m.group(0)
+            # Already rewritten to a local asset on an earlier pass, possibly under a
+            # different --base (cached CSS is reused): re-prefix it for the current base.
+            # A plain startswith(base + "/") test is wrong for an empty base, where it
+            # would also swallow //host/... and /universal/... source URLs.
+            lm = _LOCAL_ASSET_RE.match(raw)
+            if lm and os.path.exists(os.path.join(self.out, "assets", *lm.group("rest").split("/"))):
+                return f"url({self.base}/assets/{lm.group('rest')})"
             abs_url = urljoin(css_src_url, raw)
             if not SQSP_HOST_RE.search(abs_url):
                 # leave non-squarespace url() (e.g. gstatic fonts) alone
@@ -251,6 +260,23 @@ class Mirror:
             return f"url({local})"
 
         return re.sub(r"url\(\s*([^)]+?)\s*\)", repl, css_text)
+
+    def prune_stale_assets(self):
+        """Delete files under assets/{css,img,fonts,files} that this run did not register
+        (CSS/font hashes left over from an earlier snapshot; they may still carry an old
+        --base prefix). js/ and video/ are written directly by the run and are left alone."""
+        keep = {os.path.normcase(os.path.abspath(v[1])) for v in self.downloads.values()}
+        keep.add(os.path.normcase(os.path.abspath(
+            os.path.join(self.out, "assets", "css", "mirror-overrides.css"))))
+        removed = []
+        for sub in ("css", "img", "fonts", "files"):
+            d = os.path.join(self.out, "assets", sub)
+            for name in (sorted(os.listdir(d)) if os.path.isdir(d) else []):
+                path = os.path.join(d, name)
+                if os.path.isfile(path) and os.path.normcase(os.path.abspath(path)) not in keep:
+                    os.remove(path)
+                    removed.append(f"{sub}/{name}")
+        return removed
 
     def process_css_files(self):
         """After download, rewrite url() inside every downloaded .css to local assets,
@@ -1277,6 +1303,14 @@ def write_support_files(mirror):
     # 404
     with open(os.path.join(out, "404.html"), "w", encoding="utf-8") as f:
         f.write(NOT_FOUND_HTML.replace("__BASE__", mirror.base))
+    # CNAME: GitHub Pages binds the custom domain named in <out>/CNAME on every deploy,
+    # so write it only when asked for and remove a stale one otherwise.
+    cname_path = os.path.join(out, "CNAME")
+    if mirror.cname:
+        with open(cname_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(mirror.cname + "\n")
+    elif os.path.exists(cname_path):
+        os.remove(cname_path)
 
 
 NOT_FOUND_HTML = """<!doctype html>
@@ -1381,13 +1415,35 @@ def crawl(mirror):
 
 
 def main():
+    global PAGES_HOST
     ap = argparse.ArgumentParser(description="Static mirror of hauscr.org for GitHub Pages preview.")
-    ap.add_argument("--base", default="/hauscr-website", help="GitHub Pages base path prefix")
+    ap.add_argument("--base", default="/hauscr-website",
+                    help="URL path prefix the site is served under (GitHub Pages project sub-path). "
+                         "Pass an empty string when serving from a domain root, e.g. with --cname.")
     ap.add_argument("--out", default="docs", help="output directory")
+    ap.add_argument("--cname", default=None, metavar="HOST",
+                    help="custom domain for GitHub Pages: writes <out>/CNAME, implies "
+                         "--pages-host https://HOST, and requires an empty --base")
+    ap.add_argument("--pages-host", default=None, metavar="ORIGIN",
+                    help=f"origin used for canonical / og:url / og:image (default {PAGES_HOST}, "
+                         "or https://<cname> when --cname is given)")
     args = ap.parse_args()
 
-    mirror = Mirror(args.base, args.out)
-    print(f"Mirroring {SRC_ORIGIN} -> {args.out}/ (base={args.base})")
+    base = args.base.strip().rstrip("/")
+    cname = (args.cname or "").strip().lower().rstrip(".") or None
+    if cname:
+        if "://" in cname or "/" in cname or " " in cname:
+            ap.error("--cname takes a bare hostname, e.g. dev.hauscr.org")
+        if base:
+            ap.error("--cname serves the site at the domain root; pass --base '' with it")
+    if args.pages_host:
+        PAGES_HOST = args.pages_host.strip().rstrip("/")
+    elif cname:
+        PAGES_HOST = "https://" + cname
+
+    mirror = Mirror(base, args.out, cname=cname)
+    print(f"Mirroring {SRC_ORIGIN} -> {args.out}/ (base={base!r}, pages_host={PAGES_HOST}"
+          + (f", cname={cname}" if cname else "") + ")")
 
     print("Crawling pages...")
     pages = crawl(mirror)
@@ -1398,7 +1454,14 @@ def main():
     print("Rewriting CSS url() references...")
     mirror.process_css_files()
 
-    print("Writing support files (.nojekyll, 404, site.js, overrides)...")
+    stale = mirror.prune_stale_assets()
+    if stale:
+        print(f"  pruned {len(stale)} stale asset file(s) no longer referenced by this snapshot:")
+        for name in stale:
+            print("   ", name)
+
+    print("Writing support files (.nojekyll, 404, site.js, overrides"
+          + (", CNAME" if mirror.cname else "") + ")...")
     write_support_files(mirror)
 
     print(f"\nDone: {len(pages)} pages, {len(mirror.downloads)} unique assets.")

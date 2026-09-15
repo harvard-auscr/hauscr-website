@@ -1,7 +1,8 @@
 /*
  * check_mirror.js - self-verification for the hauscr.org static mirror.
  *
- * Serves docs/ under the GitHub Pages base path (/hauscr-website), then loads
+ * Serves docs/ under the GitHub Pages base path (/hauscr-website; override with
+ * BASE_PATH, empty for a domain root, and DOCS_DIR for another build), then loads
  * every generated page in headless Chrome at desktop (1280x900) and mobile
  * (390x844) and asserts:
  *   - the page responds HTTP 200
@@ -22,9 +23,9 @@ const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
 
-const BASE = '/hauscr-website';
+const BASE = process.env.BASE_PATH !== undefined ? process.env.BASE_PATH.replace(/\/$/, '') : '/hauscr-website';
 const REPO = path.resolve(__dirname, '..');
-const DOCS = path.join(REPO, 'docs');
+const DOCS = process.env.DOCS_DIR ? path.resolve(process.env.DOCS_DIR) : path.join(REPO, 'docs');
 const PORT = 8731;
 const SHOTS = process.env.SHOTS_DIR ||
   path.join(REPO, '.shots');
